@@ -34,7 +34,7 @@ if __name__ == "__main__":
         os.rmdir(module)
         print(f"[삭제] 폴더 {module}")
 
-    # === [자동 등록 해제 안내 메시지] ===
+    # === [자동 등록 해제 및 프록시 해제 안내 메시지] ===
     print(f"""
 [가이드] FastAPI 백엔드 main.py에서 아래 코드를 삭제하세요!
 
@@ -48,6 +48,19 @@ app.include_router({module}_router.router, prefix="/{module}")
 import {module_cap}Page from './modules/{module}';
 // ...
 <Route path="/{module}" element={{ <{module_cap}Page /> }} />
+
+--------------------------------------
+
+[가이드] nginx.conf (nginx.dev.conf, nginx.prod.conf)에서 아래 location 블록을 제거하거나,
+generate_nginx_conf.py 스크립트를 실행하세요!
+
+    location /{module}/ {{
+        proxy_pass http://backend:8000/{module}/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }}
 """)
 
     print(f"\n✅ '{module}' 모듈 관련 파일/폴더 삭제 완료!")

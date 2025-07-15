@@ -1,11 +1,12 @@
 import os
 
 folders = [
-    'common', 'nginx', 'backend/app', 'db/data', 'redis/data', 'templates/backend_module/app', 'templates/frontend_module/src', 'templates/db_module'
+    'common', 'nginx', 'backend/app', 'db/data', 'redis/data',
+    'templates/backend_module/app', 'templates/frontend_module/src', 'templates/db_module'
 ]
 
 files = {
-        '.gitignore': """
+    '.gitignore': """
 # Node/React
 node_modules/
 build/
@@ -170,6 +171,8 @@ services:
       - ./backend/app:/app/app
     env_file:
       - .env.dev
+    environment:
+      - PYTHONPATH=/app/app  # 👈 추가됨!
     ports:
       - "8000:8000"
     depends_on:
@@ -214,6 +217,8 @@ services:
       dockerfile: Dockerfile.prod
     env_file:
       - .env.prod
+    environment:
+      - PYTHONPATH=/app/app  # 👈 추가됨!
     ports:
       - "8000:8000"
     depends_on:
@@ -254,7 +259,6 @@ services:
     'db/init.sql': "-- 필요시 개발용 초기 SQL 작성\n"
 }
 
-
 def make_generate_nginx_conf():
     nginx_conf_code = """
 import os
@@ -288,7 +292,6 @@ print(f"✅ {conf_path} 자동생성 완료! (dev_mode={dev_mode})")
         f.write(nginx_conf_code)
     print("[파일 생성] nginx/generate_nginx_conf.py")
 
-
 def make_folders():
     for folder in folders:
         os.makedirs(folder, exist_ok=True)
@@ -299,7 +302,6 @@ def make_files():
         with open(filepath, 'w', encoding='utf-8') as f:
             f.write(content.lstrip('\n'))
         print(f'[파일 생성] {filepath}')
-
 
 if __name__ == '__main__':
     make_folders()

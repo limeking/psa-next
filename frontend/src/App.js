@@ -1,24 +1,19 @@
-import logo from './logo.svg';
-import './App.css';
+import React from 'react';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
 
 function App() {
   return (
-    <div className="App">
-      <header className="App-header">
-        <img src={logo} className="App-logo" alt="logo" />
-        <p>
-          Edit <code>src/App.js</code> and save to reload.
-        </p>
-        <a
-          className="App-link"
-          href="https://reactjs.org"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Learn React hahaha!
-        </a>
-      </header>
-    </div>
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={
+          <div style={{textAlign: "center", marginTop: "5em"}}>
+            <h2>Welcome to PSA-NEXT</h2>
+            <p>메인 페이지입니다.</p>
+            <a href="/admin">Admin 대시보드로 이동</a>
+          </div>
+        } />
+      </Routes>
+    </BrowserRouter>
   );
 }
 

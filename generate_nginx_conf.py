@@ -1,8 +1,7 @@
 import os
 
-# 개발모드(True)일 땐 로컬 프론트엔드(npm start)를 프록시,
-# 운영모드(False)일 땐 프론트 컨테이너(정적 빌드)를 프록시
-dev_mode = True  # <-- 이 값을 바꿔서 개발/운영용 conf 생성
+# 개발모드(True): 로컬 프론트 프록시, False: 프론트 컨테이너 프록시
+dev_mode = True  # 필요시 수동 변경
 
 modules = []
 for name in os.listdir('.'):
@@ -14,13 +13,17 @@ if dev_mode:
     frontend_proxy = "proxy_pass http://host.docker.internal:3000;"
 else:
     conf_path = "nginx/nginx.prod.conf"
-    frontend_proxy = "proxy_pass http://user-frontend:80;"
+    frontend_proxy = "proxy_pass http://frontend:80;"
 
 with open(conf_path, "w", encoding="utf-8") as f:
     f.write("server {\n    listen 80;\n")
     for m in modules:
-        f.write(f"    location /{m}/api/ " + "{\n")
-        f.write(f"        proxy_pass http://{m}-backend:8000/;\n")
+        f.write(f"    location /{m}/ " + "{\n")
+        f.write(f"        proxy_pass http://backend:8000/{m}/;\n")
+        f.write("        proxy_set_header Host $host;\n")
+        f.write("        proxy_set_header X-Real-IP $remote_addr;\n")
+        f.write("        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n")
+        f.write("        proxy_set_header X-Forwarded-Proto $scheme;\n")
         f.write("    }\n")
     f.write("    location / {\n        " + frontend_proxy + "\n    }\n")
     f.write("}\n")

@@ -2,7 +2,6 @@ import os
 import sys
 
 def write_file(path, content):
-    # 상위 폴더가 없으면 만들어주고 파일을 쓴다
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         f.write(content)
@@ -24,9 +23,9 @@ export default function {module_cap}Page() {{
 }}
 """)
 
-    # 2. 백엔드 (FastAPI)
+    # 2. 백엔드 (FastAPI, backend/app/modules/ 경로로 강제)
     write_file(
-        f"backend/modules/{module}/routers/{module}.py",
+        f"backend/app/modules/{module}/routers/{module}.py",
         f"""from fastapi import APIRouter
 
 router = APIRouter()
@@ -37,7 +36,7 @@ def get_{module}():
 """)
 
     write_file(
-        f"backend/modules/{module}/models/{module}.py",
+        f"backend/app/modules/{module}/models/{module}.py",
         f"""# {module_cap} DB 모델 예시
 # from sqlalchemy import ...
 """)
@@ -52,21 +51,21 @@ def get_{module}():
 """
     )
 
-    # 4. (선택) 모듈 메타 정보 파일 (삭제용/식별용)
+    # 4. 모듈 메타 정보 파일
     write_file(
         f"{module}/module_info.json",
         f"""{{
   "name": "{module}",
   "type": "기능모듈",
   "description": "{module_cap} 기능 모듈 (자동 생성)",
-  "backend": "backend/modules/{module}",
+  "backend": "backend/app/modules/{module}",
   "frontend": "frontend/src/modules/{module}",
   "db": "db/modules/{module}"
 }}
 """
     )
 
-    # === [자동 등록 안내 메시지] ===
+    # === [자동 등록/프록시 안내 메시지] ===
     print(f"""
 [가이드] FastAPI 백엔드 main.py에 아래 코드를 추가하세요!
 
@@ -80,6 +79,19 @@ app.include_router({module}_router.router, prefix="/{module}")
 import {module_cap}Page from './modules/{module}';
 // ...
 <Route path="/{module}" element={{ <{module_cap}Page /> }} />
+
+--------------------------------------
+
+[가이드] nginx.conf (nginx.dev.conf, nginx.prod.conf) location 블록에 아래 라인을 추가하거나,
+generate_nginx_conf.py 스크립트를 실행하세요!
+
+    location /{module}/ {{
+        proxy_pass http://backend:8000/{module}/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }}
 
 """)
 
