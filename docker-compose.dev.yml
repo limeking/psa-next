@@ -5,11 +5,9 @@ services:
       context: ./backend
       dockerfile: Dockerfile.dev
     volumes:
-      - ./backend/app:/app/app
-    env_file:
-      - .env.dev
+      - ./:/app
     environment:
-      - PYTHONPATH=/app/app  # 👈 추가됨!
+      - PYTHONPATH=/app
     ports:
       - "8000:8000"
     depends_on:

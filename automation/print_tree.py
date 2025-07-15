@@ -1,10 +1,13 @@
 import os
+import sys
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+os.chdir(PROJECT_ROOT)
 
-# 제외할 폴더/파일(원한다면 추가 가능)
 EXCLUDE = {'.git', '__pycache__', '.venv', 'node_modules', '.idea', '.vscode', '.DS_Store', 'Thumbs.db'}
 
 def print_tree(path, indent=""):
-    entries = sorted([e for e in os.listdir(path) if e not in EXCLUDE and not e.startswith('.')])
+    entries = sorted([e for e in os.listdir(path) if e not in EXCLUDE and not e.startswith('.')]
+    )
     for idx, entry in enumerate(entries):
         full_path = os.path.join(path, entry)
         is_last = (idx == len(entries) - 1)

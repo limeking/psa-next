@@ -1,0 +1,4 @@
+-- Admin 관련 테이블 DDL
+-- 아래 주석을 해제하고, 필요시 테이블을 직접 DROP/생성하세요!
+-- DROP TABLE IF EXISTS admin;  -- (직접 DROP 시 사용)
+-- CREATE TABLE admin (...);
