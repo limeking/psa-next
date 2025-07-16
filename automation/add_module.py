@@ -12,6 +12,28 @@ def write_file(path, content):
         f.write(content)
     print(f"[생성] {path}")
 
+def ensure_appjs_exists():
+    appjs_path = "frontend/src/App.js"
+    if not os.path.exists(appjs_path):
+        os.makedirs(os.path.dirname(appjs_path), exist_ok=True)
+        content = '''import React from "react";
+import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
+
+function App() {
+  return (
+    <Router>
+      <Routes>
+        {/* Route will be auto-injected by automation */}
+      </Routes>
+    </Router>
+  );
+}
+export default App;
+'''
+        with open(appjs_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        print(f"[생성] App.js (최소 기본 템플릿)")
+
 def add_route_to_appjs(module, module_cap):
     appjs_path = "frontend/src/App.js"
     import_line = f"import {module_cap}Page from './modules/{module}';"
@@ -21,12 +43,14 @@ def add_route_to_appjs(module, module_cap):
         return
     with open(appjs_path, "r", encoding="utf-8") as f:
         lines = f.readlines()
+    # import 중복 방지
     if not any(import_line in line for line in lines):
         insert_idx = 0
         for idx, line in enumerate(lines):
             if line.strip().startswith("import") and "react" not in line.lower():
                 insert_idx = idx + 1
         lines.insert(insert_idx, import_line + "\n")
+    # Route 추가 (중복 방지)
     route_inserted = False
     new_lines = []
     for line in lines:
@@ -52,29 +76,27 @@ def add_router_to_mainpy(module, module_cap):
     if not os.path.exists(mainpy_path):
         print(f"[경고] main.py를 찾을 수 없습니다: {mainpy_path}")
         return
-
     with open(mainpy_path, "r", encoding="utf-8") as f:
         lines = f.readlines()
-    # 1. import_line은 모든 import fastapi 다음에!
+    # import_line은 app = FastAPI() 선언 바로 위에
     import_insert_idx = 0
     for idx, line in enumerate(lines):
         if "app = FastAPI()" in line.replace(" ", ""):
-            import_insert_idx = idx  # app = FastAPI() 선언 바로 위
+            import_insert_idx = idx
             break
     lines.insert(import_insert_idx, import_line + "\n")
-
-    # 2. include_line은 app = FastAPI() 선언 아래에만!
+    # include_line은 app = FastAPI() 선언 바로 아래에
     include_insert_idx = 0
     for idx, line in enumerate(lines):
         if "app = FastAPI()" in line.replace(" ", ""):
             include_insert_idx = idx + 1
             break
-    # 이미 있는지 체크
     if not any(include_line in line for line in lines):
         lines.insert(include_insert_idx, include_line + "\n")
     with open(mainpy_path, "w", encoding="utf-8") as f:
         f.writelines(lines)
     print("[수정] main.py import/include_router 자동 추가 완료")
+
 
 def main():
     if len(sys.argv) < 2:
@@ -82,6 +104,8 @@ def main():
         sys.exit(1)
     module = sys.argv[1].lower()
     module_cap = module.capitalize()
+
+    ensure_appjs_exists()  # <<< App.js 최소 템플릿 자동 생성
 
     # 프론트
     write_file(
