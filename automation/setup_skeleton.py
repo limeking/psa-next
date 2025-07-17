@@ -234,6 +234,21 @@ services:
     depends_on:
       - backend
 """,
+        "frontend/src/App.js": '''
+import React from "react";
+import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
+
+function App() {
+  return (
+    <Router>
+      <Routes>
+        {/* Route will be auto-injected by automation */}
+      </Routes>
+    </Router>
+  );
+}
+export default App;
+''',
     ".env.dev": "EXAMPLE_KEY=dev\n",
     ".env.prod": "EXAMPLE_KEY=prod\n",
     "db/init.sql": "-- 필요시 개발용 초기 SQL 작성\n"

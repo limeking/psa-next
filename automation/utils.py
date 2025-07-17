@@ -57,37 +57,82 @@ def remove_route_from_main(module_name):
 
 
 def add_route_to_appjs(module_name):
-    import_line = f"import {module_name.capitalize()}Page from './modules/{module_name}/pages/{module_name.capitalize()}Page';"
-    route_line = f"<Route path=\"/{module_name}/status\" element={{<{module_name.capitalize()}Page />}} />"
+    """
+    - sysadmin은 SystemStatusPage, /sysadmin/status
+    - 그 외는 {ModuleCap}Page, /{module}
+    - 실제 파일/컴포넌트명과 정확히 맞춤
+    """
+    appjs_path = APP_JS_FILE
 
-    with open(APP_JS_FILE, 'r', encoding='utf-8') as f:
-        content = f.read()
+    if module_name == "sysadmin":
+        import_line = "import SystemStatusPage from './modules/sysadmin/pages/SystemStatusPage';\n"
+        route_line = '          <Route path="/sysadmin/status" element={<SystemStatusPage />} />\n'
+    else:
+        module_cap = module_name.capitalize()
+        import_line = f"import {module_cap}Page from './modules/{module_name}';\n"
+        route_line = f'          <Route path="/{module_name}" element={{ <{module_cap}Page /> }} />\n'
 
-    if import_line in content or route_line in content:
+    # 파일 읽기
+    with open(appjs_path, 'r', encoding='utf-8') as f:
+        lines = f.readlines()
+
+    # 이미 import 또는 라우트가 있으면 중복 삽입 방지
+    if any(import_line.strip() in l.strip() for l in lines) and any(route_line.strip() in l.strip() for l in lines):
         return
 
-    content = content.replace('import {', f'{import_line}\nimport {{')
-    content = content.replace('</Routes>', f'  {route_line}\n    </Routes>')
+    # import 라인 추가: 첫 import 라인 다음에 삽입
+    insert_import_idx = 0
+    for i, l in enumerate(lines):
+        if l.strip().startswith("import"):
+            insert_import_idx = i + 1
+    lines.insert(insert_import_idx, import_line)
 
-    with open(APP_JS_FILE, 'w', encoding='utf-8') as f:
-        f.write(content)
+    # <Routes> 태그 위치 탐색
+    routes_end = -1
+    for i, l in enumerate(lines):
+        if '</Routes>' in l:
+            routes_end = i
+            break
+
+    if routes_end != -1:
+        # </Routes> 바로 위에 route_line 삽입
+        lines.insert(routes_end, route_line)
+    else:
+        print("[자동화경고] App.js에 <Routes> 태그가 없습니다. 직접 라우트 추가 필요!")
+
+    # 파일로 다시 쓰기
+    with open(appjs_path, 'w', encoding='utf-8') as f:
+        f.writelines(lines)
+
+
 
 
 def remove_route_from_appjs(module_name):
-    import_re = re.compile(rf"import .*{module_name.capitalize()}Page.*\n")
-    route_re = re.compile(rf"\s*<Route path=\"/{module_name}/status\" element={{<.*?/>}} />\n")
+    """
+    - add_route_to_appjs와 완벽하게 1:1로 import/route 삭제
+    """
+    appjs_path = APP_JS_FILE
 
-    with open(APP_JS_FILE, 'r', encoding='utf-8') as f:
+    if module_name == "sysadmin":
+        import_line = "import SystemStatusPage from './modules/sysadmin/pages/SystemStatusPage';"
+        route_line = '<Route path="/sysadmin/status" element={<SystemStatusPage />} />'
+    else:
+        module_cap = module_name.capitalize()
+        import_line = f"import {module_cap}Page from './modules/{module_name}';"
+        route_line = f'<Route path="/{module_name}" element={{ <{module_cap}Page /> }} />'
+
+    with open(appjs_path, 'r', encoding='utf-8') as f:
         lines = f.readlines()
 
     new_lines = []
     for line in lines:
-        if import_re.match(line) or route_re.match(line):
+        if import_line in line or route_line in line:
             continue
         new_lines.append(line)
 
-    with open(APP_JS_FILE, 'w', encoding='utf-8') as f:
+    with open(appjs_path, 'w', encoding='utf-8') as f:
         f.writelines(new_lines)
+
 
 
 def run_generate_nginx():

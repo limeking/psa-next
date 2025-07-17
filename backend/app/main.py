@@ -1,6 +1,6 @@
-from backend.app.modules.sysadmin.routers import router as sysadmin_router
-from backend.app.modules.admin.routers import admin as admin_router
 from fastapi import FastAPI
+from backend.app.modules.admin.routers import admin as admin_router
+from backend.app.modules.sysadmin.routers import router as sysadmin_router
 
 app = FastAPI()
 app.include_router(sysadmin_router)

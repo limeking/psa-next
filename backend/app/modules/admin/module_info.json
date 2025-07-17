@@ -2,7 +2,7 @@
   "name": "admin",
   "type": "기능모듈",
   "description": "Admin 기능 모듈 (자동 생성)",
-  "created_at": "2025-07-16 15:40:29",
+  "created_at": "2025-07-17 13:09:12",
   "creator": "limeking",
   "enabled": true,
   "backend": "backend/app/modules/admin",

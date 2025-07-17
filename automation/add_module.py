@@ -69,6 +69,7 @@ def add_route_to_appjs(module, module_cap):
         f.writelines(new_lines)
     print("[수정] App.js import/Route 자동 추가 완료")
 
+
 def add_router_to_mainpy(module, module_cap):
     mainpy_path = "backend/app/main.py"
     import_line = f"from backend.app.modules.{module}.routers import {module} as {module}_router"
