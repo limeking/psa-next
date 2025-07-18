@@ -145,7 +145,6 @@ FROM nginx:alpine
 COPY nginx.dev.conf /etc/nginx/conf.d/default.conf
 """,
     "docker-compose.dev.yml": """
-version: "3.9"
 services:
   backend:
     build:
@@ -191,7 +190,6 @@ services:
       - backend
 """,
     "docker-compose.prod.yml": """
-version: "3.9"
 services:
   backend:
     build:
