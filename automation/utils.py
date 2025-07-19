@@ -1,4 +1,3 @@
-# automation/utils.py
 import os
 import subprocess
 from pathlib import Path
@@ -131,6 +130,9 @@ def add_route_to_appjs(module_name):
     if module_name == "sysadmin":
         import_line = "import SystemStatusPage from './modules/sysadmin/pages/SystemStatusPage';\n"
         route_line = '          <Route path="/sysadmin/status" element={<SystemStatusPage />} />\n'
+    elif module_name == "sysadmin/module-tree":
+        import_line = "import ModuleTreePage from './modules/sysadmin/pages/ModuleTreePage';\n"
+        route_line = '          <Route path="/sysadmin/module-tree" element={<ModuleTreePage />} />\n'
     else:
         module_cap = module_name.capitalize()
         import_line = f"import {module_cap}Page from './modules/{module_name}';\n"
@@ -185,29 +187,48 @@ def add_route_to_appjs(module_name):
         f.writelines(output_lines)
 
 def remove_route_from_appjs(module_name):
+    print(f"=== remove_route_from_appjs CALLED: {module_name} ===")   # 로그 추가
     appjs_path = APP_JS_FILE
 
+    # 완전 무차별적으로 포함된 모든 줄 삭제
+    keywords_to_remove = []
+
     if module_name == "sysadmin":
-        import_line = "import SystemStatusPage from './modules/sysadmin/pages/SystemStatusPage';"
-        route_line = '<Route path="/sysadmin/status" element={<SystemStatusPage />} />'
+        keywords_to_remove = [
+            "SystemStatusPage"
+        ]
+    elif module_name == "sysadmin/module-tree":
+        keywords_to_remove = [
+            "ModuleTreePage",
+            "Sysadmin/module-treePage",
+            "./modules/sysadmin/pages/ModuleTreePage",
+            "./modules/sysadmin/module-tree"
+        ]
     else:
         module_cap = module_name.capitalize()
-        import_line = f"import {module_cap}Page from './modules/{module_name}';"
-        route_line = f'<Route path="/{module_name}" element={{ <{module_cap}Page /> }} />'
+        keywords_to_remove = [
+            f"{module_cap}Page",
+            f"./modules/{module_name}"
+        ]
 
     with open(appjs_path, 'r', encoding='utf-8') as f:
         lines = f.readlines()
 
     new_lines = []
     for line in lines:
-        if import_line in line or route_line in line:
+        # 한 줄에 키워드 중 하나라도 포함되면 무조건 삭제!
+        # (대소문자 구분도 안 하려면: line.lower()와 kw.lower() 비교)
+        if any(kw in line for kw in keywords_to_remove):
             continue
         new_lines.append(line)
 
+    # 최종적으로 import도, Route도, 아무 위치든 100% 삭제
     with open(appjs_path, 'w', encoding='utf-8') as f:
         f.writelines(new_lines)
 
+    # routes 정렬은 취향
     sort_appjs_routes()
+
 
 def sort_appjs_routes():
     appjs_path = APP_JS_FILE

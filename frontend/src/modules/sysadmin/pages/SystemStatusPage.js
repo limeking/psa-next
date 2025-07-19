@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { fetchSystemStatus, fetchModuleList, fetchEvents, createModule, deleteModule } from '../api/sysadmin';
+import { fetchSystemStatus, fetchModuleList, fetchEvents, createModule, deleteModule, restartBackend } from '../api/sysadmin';
 
 function ModuleManager() {
   const [moduleName, setModuleName] = useState('');
@@ -98,6 +98,7 @@ function EventLog() {
 function SystemStatusPage() {
   const [status, setStatus] = useState({});
   const [loading, setLoading] = useState(true);
+  const [restartStatus, setRestartStatus] = useState(null)
 
   useEffect(() => {
     fetchSystemStatus()
@@ -109,10 +110,19 @@ function SystemStatusPage() {
   if (loading) return <div>로딩중...</div>;
   if (status.error) return <div>에러: {status.error}</div>;
 
+  const handleRestart = async () => {
+    setRestartStatus("서버 리스타트 진행중...");
+    const res = await restartBackend();
+    if (res.success) setRestartStatus("서버 리스타트 완료!");
+    else setRestartStatus("에러: " + (res.stderr || res.error));
+  };
+
   return (
     <div>
       <h2>시스템 상태 (환경: {status.env})</h2>
       <ModuleManager />
+      <button onClick={handleRestart} style={{marginBottom: 16}}>서버 리스타트</button>
+      {restartStatus && <div>{restartStatus}</div>}
       <table>
         <thead>
           <tr>

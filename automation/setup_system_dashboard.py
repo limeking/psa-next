@@ -179,6 +179,80 @@ def delete_module(data: ModuleName):
     except Exception as e:
         return {"success": False, "error": str(e)}
 
+@router.post("/restart_backend")
+def restart_backend():
+    """
+    backend 컨테이너만 docker compose로 리스타트
+    """
+
+    import shutil
+
+    if not shutil.which("docker"):
+        return {"success": False, "error": "docker CLI가 서버 환경에 설치/등록되어 있지 않습니다."}  
+
+    try:
+        result = subprocess.run(
+            ["docker", "compose", "restart", "backend"],
+            capture_output=True, text=True, cwd="/app"
+        )
+        return {
+            "success": result.returncode == 0,
+            "stdout": result.stdout,
+            "stderr": result.stderr
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}     
+
+@router.get("/tree")
+def get_modules_tree():
+    """
+    PSA-NEXT 전체 구조/모듈 트리형 JSON 반환 (백엔드/프론트/DB 구조 통합)
+    """
+    try:
+        current_dir = Path(__file__).resolve()
+        backend_dir = current_dir.parent.parent
+        frontend_dir = current_dir.parent.parent.parent.parent / "frontend/src/modules"
+        db_dir = current_dir.parent.parent.parent.parent / "db/modules"
+
+        def get_children(directory):
+            if not directory.exists():
+                return []
+            items = []
+            for p in sorted(directory.iterdir(), key=lambda x: x.name):
+                if p.is_dir():
+                    items.append({
+                        "name": p.name,
+                        "type": "folder",
+                        "children": get_children(p)
+                    })
+                else:
+                    items.append({
+                        "name": p.name,
+                        "type": "file"
+                    })
+            return items
+
+        tree = {
+            "name": "PSA-NEXT",
+            "children": [
+                {
+                    "name": "backend",
+                    "children": get_children(backend_dir)
+                },
+                {
+                    "name": "frontend",
+                    "children": get_children(frontend_dir)
+                },
+                {
+                    "name": "db",
+                    "children": get_children(db_dir)
+                }
+            ]
+        }
+        return tree
+    except Exception as e:
+        return {"error": str(e)}   
+
 ''',
 
     'schemas.py': '''from pydantic import BaseModel
@@ -198,7 +272,7 @@ class SystemStatus(BaseModel):
 
 FRONTEND_FILES = {
     'pages/SystemStatusPage.js': '''import React, { useEffect, useState } from 'react';
-import { fetchSystemStatus, fetchModuleList, fetchEvents, createModule, deleteModule } from '../api/sysadmin';
+import { fetchSystemStatus, fetchModuleList, fetchEvents, createModule, deleteModule, restartBackend } from '../api/sysadmin';
 
 function ModuleManager() {
   const [moduleName, setModuleName] = useState('');
@@ -297,6 +371,7 @@ function EventLog() {
 function SystemStatusPage() {
   const [status, setStatus] = useState({});
   const [loading, setLoading] = useState(true);
+  const [restartStatus, setRestartStatus] = useState(null)
 
   useEffect(() => {
     fetchSystemStatus()
@@ -308,10 +383,19 @@ function SystemStatusPage() {
   if (loading) return <div>로딩중...</div>;
   if (status.error) return <div>에러: {status.error}</div>;
 
+  const handleRestart = async () => {
+    setRestartStatus("서버 리스타트 진행중...");
+    const res = await restartBackend();
+    if (res.success) setRestartStatus("서버 리스타트 완료!");
+    else setRestartStatus("에러: " + (res.stderr || res.error));
+  };
+
   return (
     <div>
       <h2>시스템 상태 (환경: {status.env})</h2>
       <ModuleManager />
+      <button onClick={handleRestart} style={{marginBottom: 16}}>서버 리스타트</button>
+      {restartStatus && <div>{restartStatus}</div>}
       <table>
         <thead>
           <tr>
@@ -336,6 +420,44 @@ function SystemStatusPage() {
 }
 
 export default SystemStatusPage;
+''',
+
+'pages/ModuleTreePage.js': '''import React, { useEffect, useState } from "react";
+
+function renderTree(node) {
+  if (!node) return null;
+  if (node.children && node.children.length > 0) {
+    return (
+      <li>
+        <strong>{node.name}</strong>
+        <ul>
+          {node.children.map((child, idx) => (
+            <React.Fragment key={child.name + idx}>{renderTree(child)}</React.Fragment>
+          ))}
+        </ul>
+      </li>
+    );
+  }
+  return <li>{node.name}</li>;
+}
+
+export default function ModuleTreePage() {
+  const [tree, setTree] = useState(null);
+
+  useEffect(() => {
+    fetch("/api/sysadmin/tree")
+      .then(res => res.json())
+      .then(setTree);
+  }, []);
+
+  if (!tree) return <div>트리 구조 불러오는 중...</div>;
+  return (
+    <div>
+      <h2>PSA-NEXT 전체 구조 트리</h2>
+      <ul>{renderTree(tree)}</ul>
+    </div>
+  );
+}
 ''',
 
     'api/sysadmin.js': '''export async function fetchSystemStatus() {
@@ -364,6 +486,10 @@ export async function deleteModule(moduleName) {
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({name: moduleName})
   });
+  return await res.json();
+}
+export async function restartBackend() {
+  const res = await fetch('/api/sysadmin/restart_backend', { method: 'POST' });
   return await res.json();
 }
 ''',
@@ -413,6 +539,7 @@ def create_sysadmin_module():
 
     add_route_to_main('sysadmin')    # FastAPI main.py에 라우터 자동 등록
     add_route_to_appjs('sysadmin')   # React App.js에 라우트 자동 등록
+    add_route_to_appjs('sysadmin/module-tree')  # 트리뷰 경로 자동등록
     run_generate_nginx()             # Nginx location 자동 동기화
     print("✅ System dashboard module created & Nginx conf updated!")
 
@@ -424,6 +551,7 @@ def delete_sysadmin_module():
 
     remove_route_from_main('sysadmin')
     remove_route_from_appjs('sysadmin')
+    remove_route_from_appjs('sysadmin/module-tree')  # ⭐️ 이 한 줄 추가!
     run_generate_nginx()
     print("🗑️ System dashboard module deleted & Nginx conf updated!")
 

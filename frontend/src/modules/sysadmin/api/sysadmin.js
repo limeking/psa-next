@@ -26,3 +26,7 @@ export async function deleteModule(moduleName) {
   });
   return await res.json();
 }
+export async function restartBackend() {
+  const res = await fetch('/api/sysadmin/restart_backend', { method: 'POST' });
+  return await res.json();
+}

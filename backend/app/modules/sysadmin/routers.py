@@ -160,3 +160,77 @@ def delete_module(data: ModuleName):
     except Exception as e:
         return {"success": False, "error": str(e)}
 
+@router.post("/restart_backend")
+def restart_backend():
+    """
+    backend 컨테이너만 docker compose로 리스타트
+    """
+
+    import shutil
+
+    if not shutil.which("docker"):
+        return {"success": False, "error": "docker CLI가 서버 환경에 설치/등록되어 있지 않습니다."}  
+
+    try:
+        result = subprocess.run(
+            ["docker", "compose", "restart", "backend"],
+            capture_output=True, text=True, cwd="/app"
+        )
+        return {
+            "success": result.returncode == 0,
+            "stdout": result.stdout,
+            "stderr": result.stderr
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}     
+
+@router.get("/tree")
+def get_modules_tree():
+    """
+    PSA-NEXT 전체 구조/모듈 트리형 JSON 반환 (백엔드/프론트/DB 구조 통합)
+    """
+    try:
+        current_dir = Path(__file__).resolve()
+        backend_dir = current_dir.parent.parent
+        frontend_dir = current_dir.parent.parent.parent.parent / "frontend/src/modules"
+        db_dir = current_dir.parent.parent.parent.parent / "db/modules"
+
+        def get_children(directory):
+            if not directory.exists():
+                return []
+            items = []
+            for p in sorted(directory.iterdir(), key=lambda x: x.name):
+                if p.is_dir():
+                    items.append({
+                        "name": p.name,
+                        "type": "folder",
+                        "children": get_children(p)
+                    })
+                else:
+                    items.append({
+                        "name": p.name,
+                        "type": "file"
+                    })
+            return items
+
+        tree = {
+            "name": "PSA-NEXT",
+            "children": [
+                {
+                    "name": "backend",
+                    "children": get_children(backend_dir)
+                },
+                {
+                    "name": "frontend",
+                    "children": get_children(frontend_dir)
+                },
+                {
+                    "name": "db",
+                    "children": get_children(db_dir)
+                }
+            ]
+        }
+        return tree
+    except Exception as e:
+        return {"error": str(e)}   
+
