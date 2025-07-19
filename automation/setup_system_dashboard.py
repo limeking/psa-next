@@ -17,8 +17,7 @@ DB_SYSADMIN = BASE_DIR / 'db/modules/sysadmin.sql'
 MODULE_INFO_PATH = BACKEND_SYSADMIN / 'module_info.json'
 
 BACKEND_FILES = {
-    'routers.py': '''from fastapi import APIRouter, Request
-from automation.utils import run_generate_nginx
+    'routers.py': '''from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Request
 from pydantic import BaseModel
 from pathlib import Path
 import os
@@ -26,8 +25,37 @@ import json
 import subprocess
 import sys
 from datetime import datetime
+from typing import List
 
 router = APIRouter(prefix="/sysadmin", tags=["System Admin"])
+
+# --- WebSocket 실시간 브로드캐스트 추가 ---
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+
+    async def broadcast(self, message: dict):
+        for connection in self.active_connections:
+            await connection.send_json(message)
+
+manager = ConnectionManager()
+
+@router.websocket("/ws/events")
+async def websocket_endpoint(websocket: WebSocket):
+    await manager.connect(websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
 
 @router.get("/module-tree")
 def get_module_tree():
@@ -208,45 +236,91 @@ def get_health():
     }
     return {"health": health}
 
+# --- 실시간 이벤트를 보내는 POST API(자동화 스크립트 연동용) ---
+class EventMsg(BaseModel):
+    type: str
+    message: str
+    module: str = None
+    status: str = None
+
+@router.post("/push_event")
+async def push_event(event: EventMsg):
+    await manager.broadcast({
+        "type": event.type,
+        "message": event.message,
+        "module": event.module,
+        "status": event.status,
+        "timestamp": datetime.now().isoformat()
+    })
+    return {"ok": True}
+
+# --- 모듈 생성/삭제: 브로드캐스트 포함 ---
 class ModuleName(BaseModel):
     name: str
 
 @router.post("/create_module")
-def create_module(data: ModuleName):
-    """
-    add_module.py를 통해 모듈 자동 생성
-    """
+async def create_module(data: ModuleName):
     try:
         result = subprocess.run(
             [sys.executable, "automation/add_module.py", data.name],
             capture_output=True, text=True, cwd="/app"
         )
-        run_generate_nginx()   # Nginx conf 자동 동기화
+        status = "success" if result.returncode == 0 else "fail"
+        # 실시간 브로드캐스트
+        await manager.broadcast({
+            "type": "module_created",
+            "module": data.name,
+            "status": status,
+            "message": f"{data.name} 모듈 생성 {status}",
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+            "timestamp": datetime.now().isoformat()
+        })
         return {
-            "success": result.returncode == 0,
+            "success": status == "success",
             "stdout": result.stdout,
             "stderr": result.stderr
         }
     except Exception as e:
+        await manager.broadcast({
+            "type": "error",
+            "module": data.name,
+            "status": "fail",
+            "message": f"모듈 생성 중 에러: {e}",
+            "timestamp": datetime.now().isoformat()
+        })
         return {"success": False, "error": str(e)}
 
 @router.post("/delete_module")
-def delete_module(data: ModuleName):
-    """
-    delete_module.py를 통해 모듈 자동 삭제
-    """
+async def delete_module(data: ModuleName):
     try:
         result = subprocess.run(
             [sys.executable, "automation/delete_module.py", data.name],
             capture_output=True, text=True, cwd="/app"
         )
-        run_generate_nginx()   # Nginx conf 자동 동기화
+        status = "success" if result.returncode == 0 else "fail"
+        await manager.broadcast({
+            "type": "module_deleted",
+            "module": data.name,
+            "status": status,
+            "message": f"{data.name} 모듈 삭제 {status}",
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+            "timestamp": datetime.now().isoformat()
+        })
         return {
-            "success": result.returncode == 0,
+            "success": status == "success",
             "stdout": result.stdout,
             "stderr": result.stderr
         }
     except Exception as e:
+        await manager.broadcast({
+            "type": "error",
+            "module": data.name,
+            "status": "fail",
+            "message": f"모듈 삭제 중 에러: {e}",
+            "timestamp": datetime.now().isoformat()
+        })
         return {"success": False, "error": str(e)}
 ''', 
 
@@ -267,8 +341,9 @@ class SystemStatus(BaseModel):
 }
 
 FRONTEND_FILES = {
-    'pages/SystemStatusPage.js': '''import React, { useEffect, useState, useRef } from 'react';
-import { fetchSystemStatus, fetchModuleList, fetchEvents, createModule, deleteModule, restartBackend } from '../api/sysadmin';
+    'pages/SystemStatusPage.js': '''import React, { useEffect, useState, useRef, useCallback } from 'react';
+import { fetchSystemStatus, fetchModuleList, fetchEvents, createModule, deleteModule } from '../api/sysadmin';
+import { useEventSocket } from '../hooks/useEventSocket'; // 이 줄 추가
 
 // 상태 뱃지 (컬러/강조)
 function StatusBadge({ status }) {
@@ -372,37 +447,34 @@ function ModuleList() {
   );
 }
 
-// 에러/이벤트 로그 (강조/알림/자동 새로고침)
+
+// ⭐️ WebSocket 실시간 이벤트/에러 로그
 function EventLog() {
   const [events, setEvents] = useState([]);
   const [lastError, setLastError] = useState(null);
-  const mountedRef = useRef(false); // ⭐️ 추가
+  const mountedRef = useRef(false);
 
+  // 최초 1회 기존 REST로 이벤트 가져오기 (fallback)
   useEffect(() => {
     fetchEvents().then(res => {
       setEvents(res.events || []);
       const err = (res.events || []).find(e => (e.message || "").includes("ERROR"));
       if (err && (!lastError || lastError !== err.message)) {
-        // ⭐️ 마운트 직후 첫 실행일 땐 alert 안 띄움
-        if (mountedRef.current) {
-          window.alert(`에러 발생: ${err.message}`);
-        }
+        if (mountedRef.current) window.alert(`에러 발생: ${err.message}`);
         setLastError(err.message);
       }
-      mountedRef.current = true; // ⭐️ 첫 렌더 이후로 변경
+      mountedRef.current = true;
     });
-    const timer = setInterval(() => {
-      fetchEvents().then(res => {
-        setEvents(res.events || []);
-        const err = (res.events || []).find(e => (e.message || "").includes("ERROR"));
-        if (err && (!lastError || lastError !== err.message)) {
-          window.alert(`에러 발생: ${err.message}`);
-          setLastError(err.message);
-        }
-      });
-    }, 5000);
-    return () => clearInterval(timer);
-  }, [lastError]);
+  }, []);
+
+  // ⭐️ WebSocket으로 실시간 이벤트 받기
+  useEventSocket((msg) => {
+    setEvents(prev => [msg, ...prev].slice(0, 30)); // 최근 30개 유지
+    if ((msg.type === "error" || (msg.message || "").includes("ERROR")) && lastError !== msg.message) {
+      window.alert(`에러 발생: ${msg.message}`);
+      setLastError(msg.message);
+    }
+  });
 
   if (!events.length) return <div>이벤트 없음</div>;
   return (
@@ -411,15 +483,15 @@ function EventLog() {
       <ul>
         {events.map((e, idx) => (
           <li key={idx} style={{
-            color: e.message.includes('ERROR') ? '#e94040' :
-                   e.message.includes('WARN') ? '#ffb100' : 'black',
-            fontWeight: e.message.includes('ERROR') ? 'bold' : 'normal',
-            background: e.message.includes('ERROR') ? '#ffe0e0' : 'none',
+            color: e.type === "error" || (e.message || "").includes('ERROR') ? '#e94040' :
+                  (e.type === "warn" || (e.message || "").includes('WARN')) ? '#ffb100' : 'black',
+            fontWeight: e.type === "error" ? 'bold' : 'normal',
+            background: e.type === "error" ? '#ffe0e0' : 'none',
             borderRadius: "5px",
             padding: "2px 6px",
             marginBottom: "2px"
           }}>
-            {e.message}
+            [{e.timestamp?.slice(11,19) || ''}] {e.message}
           </li>
         ))}
       </ul>
@@ -427,11 +499,14 @@ function EventLog() {
   );
 }
 
+
 // 메인 시스템 상태 페이지 (실시간 새로고침)
 function SystemStatusPage() {
   const [status, setStatus] = useState({});
   const [loading, setLoading] = useState(true);
-  const [restartStatus, setRestartStatus] = useState(null);
+  const [events, setEvents] = useState([]);
+  const [lastError, setLastError] = useState(null);
+  const mountedRef = useRef(false);
 
   useEffect(() => {
     fetchSystemStatus()
@@ -441,27 +516,33 @@ function SystemStatusPage() {
     const timer = setInterval(() => {
       fetchSystemStatus().then(setStatus);
     }, 3000);
+    fetchEvents().then(res => {
+      setEvents(res.events || []);
+      const err = (res.events || []).find(e => (e.message || "").includes("ERROR"));
+      if (err && (!lastError || lastError !== err.message)) {
+        if (mountedRef.current) window.alert(`에러 발생: ${err.message}`);
+        setLastError(err.message);
+      }
+      mountedRef.current = true;
+    });
     return () => clearInterval(timer);
   }, []);
 
-  if (loading) return <div>로딩중...</div>;
-  if (status.error) return <div>에러: {status.error}</div>;
-
-  const handleRestart = async () => {
-    setRestartStatus("서버 리스타트 진행중...");
-    const res = await restartBackend();
-    if (res.success) setRestartStatus("서버 리스타트 완료!");
-    else setRestartStatus("에러: " + (res.stderr || res.error));
-  };
+  // ⭐️ WebSocket 연결은 여기서 한 번만!
+  const handleEvent = useCallback((msg) => {
+    setEvents(prev => [msg, ...prev].slice(0, 30));
+    if ((msg.type === "error" || (msg.message || "").includes("ERROR")) && lastError !== msg.message) {
+      window.alert(`에러 발생: ${msg.message}`);
+      setLastError(msg.message);
+    }
+  }, [lastError]);
+  useEventSocket(handleEvent);
 
   return (
     <div>
       <h2>시스템 상태 (환경: {status.env})</h2>
     <ModuleManager />
-    <button onClick={handleRestart} style={{marginBottom: 16}} disabled>
-      서버 리스타트
-    </button>
-    {restartStatus && <div>{restartStatus}</div>}
+
       <table>
         <thead>
           <tr>
@@ -554,15 +635,54 @@ export async function deleteModule(moduleName) {
   });
   return await res.json();
 }
-export async function restartBackend() {
-  const res = await fetch('/api/sysadmin/restart_backend', { method: 'POST' });
-  return await res.json();
-}
+
 ''',
 
     'components/DummyBox.js': '''import React from 'react';
 const DummyBox = () => <div>Sysadmin Dummy Component</div>;
 export default DummyBox;
+''',
+    'hooks/useEventSocket.js': '''import { useEffect, useRef } from "react";
+
+/**
+ * 실시간 WebSocket 이벤트를 수신하는 커스텀 훅 (onEvent 콜백은 ref로 고정)
+ * @param {(msg: object) => void} onEvent
+ */
+export function useEventSocket(onEvent) {
+  const wsRef = useRef(null);
+  const onEventRef = useRef(onEvent);
+
+  // onEvent가 바뀔 때마다 ref에 저장(불필요한 재연결 방지)
+  useEffect(() => {
+    onEventRef.current = onEvent;
+  }, [onEvent]);
+
+  useEffect(() => {
+    const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+    const wsUrl = `${protocol}://${window.location.host}/api/sysadmin/ws/events`;
+    const ws = new window.WebSocket(wsUrl);
+
+    ws.onmessage = (evt) => {
+      try {
+        const msg = JSON.parse(evt.data);
+        onEventRef.current && onEventRef.current(msg);
+      } catch (e) {}
+    };
+    ws.onerror = (e) => {
+      // 원하는 경우 에러 로그 출력
+      // console.error("WebSocket error:", e);
+    };
+    ws.onclose = (e) => {
+      // 필요시 닫힘 로그
+      // console.log("WebSocket closed:", e);
+    };
+
+    wsRef.current = ws;
+    return () => {
+      wsRef.current && wsRef.current.close();
+    };
+  }, []); // 의존성 없음: 최초 마운트/언마운트 시 한 번만 실행
+}
 ''',
 }
 
@@ -587,6 +707,10 @@ def write_module_info(module):
         "frontend": f"frontend/src/modules/{module}",
         "db": f"db/modules/{module}.sql"
     }
+    # ★ sysadmin 모듈이면 ws_needed True 추가
+    if module == "sysadmin":
+        info["ws_needed"] = True
+        
     with open(MODULE_INFO_PATH, 'w', encoding='utf-8') as f:
         json.dump(info, f, indent=2, ensure_ascii=False)
 

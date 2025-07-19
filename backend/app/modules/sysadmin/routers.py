@@ -1,5 +1,4 @@
-from fastapi import APIRouter, Request
-from automation.utils import run_generate_nginx
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Request
 from pydantic import BaseModel
 from pathlib import Path
 import os
@@ -7,8 +6,37 @@ import json
 import subprocess
 import sys
 from datetime import datetime
+from typing import List
 
 router = APIRouter(prefix="/sysadmin", tags=["System Admin"])
+
+# --- WebSocket 실시간 브로드캐스트 추가 ---
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+
+    async def broadcast(self, message: dict):
+        for connection in self.active_connections:
+            await connection.send_json(message)
+
+manager = ConnectionManager()
+
+@router.websocket("/ws/events")
+async def websocket_endpoint(websocket: WebSocket):
+    await manager.connect(websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
 
 @router.get("/module-tree")
 def get_module_tree():
@@ -189,43 +217,89 @@ def get_health():
     }
     return {"health": health}
 
+# --- 실시간 이벤트를 보내는 POST API(자동화 스크립트 연동용) ---
+class EventMsg(BaseModel):
+    type: str
+    message: str
+    module: str = None
+    status: str = None
+
+@router.post("/push_event")
+async def push_event(event: EventMsg):
+    await manager.broadcast({
+        "type": event.type,
+        "message": event.message,
+        "module": event.module,
+        "status": event.status,
+        "timestamp": datetime.now().isoformat()
+    })
+    return {"ok": True}
+
+# --- 모듈 생성/삭제: 브로드캐스트 포함 ---
 class ModuleName(BaseModel):
     name: str
 
 @router.post("/create_module")
-def create_module(data: ModuleName):
-    """
-    add_module.py를 통해 모듈 자동 생성
-    """
+async def create_module(data: ModuleName):
     try:
         result = subprocess.run(
             [sys.executable, "automation/add_module.py", data.name],
             capture_output=True, text=True, cwd="/app"
         )
-        run_generate_nginx()   # Nginx conf 자동 동기화
+        status = "success" if result.returncode == 0 else "fail"
+        # 실시간 브로드캐스트
+        await manager.broadcast({
+            "type": "module_created",
+            "module": data.name,
+            "status": status,
+            "message": f"{data.name} 모듈 생성 {status}",
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+            "timestamp": datetime.now().isoformat()
+        })
         return {
-            "success": result.returncode == 0,
+            "success": status == "success",
             "stdout": result.stdout,
             "stderr": result.stderr
         }
     except Exception as e:
+        await manager.broadcast({
+            "type": "error",
+            "module": data.name,
+            "status": "fail",
+            "message": f"모듈 생성 중 에러: {e}",
+            "timestamp": datetime.now().isoformat()
+        })
         return {"success": False, "error": str(e)}
 
 @router.post("/delete_module")
-def delete_module(data: ModuleName):
-    """
-    delete_module.py를 통해 모듈 자동 삭제
-    """
+async def delete_module(data: ModuleName):
     try:
         result = subprocess.run(
             [sys.executable, "automation/delete_module.py", data.name],
             capture_output=True, text=True, cwd="/app"
         )
-        run_generate_nginx()   # Nginx conf 자동 동기화
+        status = "success" if result.returncode == 0 else "fail"
+        await manager.broadcast({
+            "type": "module_deleted",
+            "module": data.name,
+            "status": status,
+            "message": f"{data.name} 모듈 삭제 {status}",
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+            "timestamp": datetime.now().isoformat()
+        })
         return {
-            "success": result.returncode == 0,
+            "success": status == "success",
             "stdout": result.stdout,
             "stderr": result.stderr
         }
     except Exception as e:
+        await manager.broadcast({
+            "type": "error",
+            "module": data.name,
+            "status": "fail",
+            "message": f"모듈 삭제 중 에러: {e}",
+            "timestamp": datetime.now().isoformat()
+        })
         return {"success": False, "error": str(e)}

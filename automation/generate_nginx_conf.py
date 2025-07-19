@@ -9,13 +9,19 @@ NGINX_DEV_CONF = BASE_DIR / 'nginx/nginx.dev.conf'
 NGINX_PROD_CONF = BASE_DIR / 'nginx/nginx.prod.conf'
 
 COMMON_PROXY_HEADERS = """
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
 """
 
-def load_enabled_modules():
+WEBSOCKET_HEADERS = """
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_http_version 1.1;
+"""
+
+def load_modules_meta():
     modules = []
     for module_name in os.listdir(MODULES_DIR):
         module_path = MODULES_DIR / module_name
@@ -24,15 +30,20 @@ def load_enabled_modules():
             with open(info_path, 'r', encoding='utf-8') as f:
                 info = json.load(f)
                 if info.get('enabled', True):
-                    modules.append(module_name)
+                    modules.append({
+                        "name": module_name,
+                        "ws_needed": info.get("ws_needed", False)
+                    })
     return modules
 
 def generate_nginx_dev_conf(modules):
     lines = ["server {", "    listen 80;"]
     for module in modules:
-        lines.append(f"    location /api/{module}/ {{")
-        lines.append(f"        proxy_pass http://backend:8000/{module}/;")
-        lines.append(COMMON_PROXY_HEADERS)
+        lines.append(f"    location /api/{module['name']}/ {{")
+        lines.append(f"        proxy_pass http://backend:8000/{module['name']}/;")
+        lines.append(COMMON_PROXY_HEADERS.rstrip())
+        if module.get("ws_needed"):
+            lines.append(WEBSOCKET_HEADERS.rstrip())
         lines.append("    }")
     lines.append("    location / {")
     lines.append("        proxy_pass http://host.docker.internal:3000;")
@@ -44,13 +55,17 @@ def generate_nginx_dev_conf(modules):
 
 def generate_nginx_prod_conf(modules):
     lines = ["server {", "    listen 80;"]
-    lines.append("    location /api/ {")
-    lines.append("        proxy_pass http://backend:8000/;")
-    lines.append(COMMON_PROXY_HEADERS)
-    lines.append("    }")
+    # (실무: prod에서도 location별 관리 필요하면 아래처럼 반복, 아니면 통합도 OK)
+    for module in modules:
+        lines.append(f"    location /api/{module['name']}/ {{")
+        lines.append(f"        proxy_pass http://backend:8000/{module['name']}/;")
+        lines.append(COMMON_PROXY_HEADERS.rstrip())
+        if module.get("ws_needed"):
+            lines.append(WEBSOCKET_HEADERS.rstrip())
+        lines.append("    }")
     lines.append("    location / {")
     lines.append("        proxy_pass http://frontend:80;")
-    lines.append(COMMON_PROXY_HEADERS)
+    lines.append(COMMON_PROXY_HEADERS.rstrip())
     lines.append("    }")
     lines.append("}")
     with open(NGINX_PROD_CONF, 'w', encoding='utf-8') as f:
@@ -58,7 +73,7 @@ def generate_nginx_prod_conf(modules):
     print(f"✅ {NGINX_PROD_CONF} regenerated.")
 
 def main():
-    modules = load_enabled_modules()
+    modules = load_modules_meta()
     print(f"[INFO] Enabled modules: {modules}")
     generate_nginx_dev_conf(modules)
     generate_nginx_prod_conf(modules)

@@ -113,7 +113,7 @@ def ping():
 ''',
     "backend/requirements.txt": """
 fastapi
-uvicorn
+uvicorn[standard]
 pymysql
 bcrypt
 """,

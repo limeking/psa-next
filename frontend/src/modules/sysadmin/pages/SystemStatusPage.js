@@ -1,5 +1,6 @@
-import React, { useEffect, useState, useRef } from 'react';
-import { fetchSystemStatus, fetchModuleList, fetchEvents, createModule, deleteModule, restartBackend } from '../api/sysadmin';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
+import { fetchSystemStatus, fetchModuleList, fetchEvents, createModule, deleteModule } from '../api/sysadmin';
+import { useEventSocket } from '../hooks/useEventSocket'; // 이 줄 추가
 
 // 상태 뱃지 (컬러/강조)
 function StatusBadge({ status }) {
@@ -103,37 +104,34 @@ function ModuleList() {
   );
 }
 
-// 에러/이벤트 로그 (강조/알림/자동 새로고침)
+
+// ⭐️ WebSocket 실시간 이벤트/에러 로그
 function EventLog() {
   const [events, setEvents] = useState([]);
   const [lastError, setLastError] = useState(null);
-  const mountedRef = useRef(false); // ⭐️ 추가
+  const mountedRef = useRef(false);
 
+  // 최초 1회 기존 REST로 이벤트 가져오기 (fallback)
   useEffect(() => {
     fetchEvents().then(res => {
       setEvents(res.events || []);
       const err = (res.events || []).find(e => (e.message || "").includes("ERROR"));
       if (err && (!lastError || lastError !== err.message)) {
-        // ⭐️ 마운트 직후 첫 실행일 땐 alert 안 띄움
-        if (mountedRef.current) {
-          window.alert(`에러 발생: ${err.message}`);
-        }
+        if (mountedRef.current) window.alert(`에러 발생: ${err.message}`);
         setLastError(err.message);
       }
-      mountedRef.current = true; // ⭐️ 첫 렌더 이후로 변경
+      mountedRef.current = true;
     });
-    const timer = setInterval(() => {
-      fetchEvents().then(res => {
-        setEvents(res.events || []);
-        const err = (res.events || []).find(e => (e.message || "").includes("ERROR"));
-        if (err && (!lastError || lastError !== err.message)) {
-          window.alert(`에러 발생: ${err.message}`);
-          setLastError(err.message);
-        }
-      });
-    }, 5000);
-    return () => clearInterval(timer);
-  }, [lastError]);
+  }, []);
+
+  // ⭐️ WebSocket으로 실시간 이벤트 받기
+  useEventSocket((msg) => {
+    setEvents(prev => [msg, ...prev].slice(0, 30)); // 최근 30개 유지
+    if ((msg.type === "error" || (msg.message || "").includes("ERROR")) && lastError !== msg.message) {
+      window.alert(`에러 발생: ${msg.message}`);
+      setLastError(msg.message);
+    }
+  });
 
   if (!events.length) return <div>이벤트 없음</div>;
   return (
@@ -142,15 +140,15 @@ function EventLog() {
       <ul>
         {events.map((e, idx) => (
           <li key={idx} style={{
-            color: e.message.includes('ERROR') ? '#e94040' :
-                   e.message.includes('WARN') ? '#ffb100' : 'black',
-            fontWeight: e.message.includes('ERROR') ? 'bold' : 'normal',
-            background: e.message.includes('ERROR') ? '#ffe0e0' : 'none',
+            color: e.type === "error" || (e.message || "").includes('ERROR') ? '#e94040' :
+                  (e.type === "warn" || (e.message || "").includes('WARN')) ? '#ffb100' : 'black',
+            fontWeight: e.type === "error" ? 'bold' : 'normal',
+            background: e.type === "error" ? '#ffe0e0' : 'none',
             borderRadius: "5px",
             padding: "2px 6px",
             marginBottom: "2px"
           }}>
-            {e.message}
+            [{e.timestamp?.slice(11,19) || ''}] {e.message}
           </li>
         ))}
       </ul>
@@ -158,11 +156,14 @@ function EventLog() {
   );
 }
 
+
 // 메인 시스템 상태 페이지 (실시간 새로고침)
 function SystemStatusPage() {
   const [status, setStatus] = useState({});
   const [loading, setLoading] = useState(true);
-  const [restartStatus, setRestartStatus] = useState(null);
+  const [events, setEvents] = useState([]);
+  const [lastError, setLastError] = useState(null);
+  const mountedRef = useRef(false);
 
   useEffect(() => {
     fetchSystemStatus()
@@ -172,27 +173,33 @@ function SystemStatusPage() {
     const timer = setInterval(() => {
       fetchSystemStatus().then(setStatus);
     }, 3000);
+    fetchEvents().then(res => {
+      setEvents(res.events || []);
+      const err = (res.events || []).find(e => (e.message || "").includes("ERROR"));
+      if (err && (!lastError || lastError !== err.message)) {
+        if (mountedRef.current) window.alert(`에러 발생: ${err.message}`);
+        setLastError(err.message);
+      }
+      mountedRef.current = true;
+    });
     return () => clearInterval(timer);
   }, []);
 
-  if (loading) return <div>로딩중...</div>;
-  if (status.error) return <div>에러: {status.error}</div>;
-
-  const handleRestart = async () => {
-    setRestartStatus("서버 리스타트 진행중...");
-    const res = await restartBackend();
-    if (res.success) setRestartStatus("서버 리스타트 완료!");
-    else setRestartStatus("에러: " + (res.stderr || res.error));
-  };
+  // ⭐️ WebSocket 연결은 여기서 한 번만!
+  const handleEvent = useCallback((msg) => {
+    setEvents(prev => [msg, ...prev].slice(0, 30));
+    if ((msg.type === "error" || (msg.message || "").includes("ERROR")) && lastError !== msg.message) {
+      window.alert(`에러 발생: ${msg.message}`);
+      setLastError(msg.message);
+    }
+  }, [lastError]);
+  useEventSocket(handleEvent);
 
   return (
     <div>
       <h2>시스템 상태 (환경: {status.env})</h2>
     <ModuleManager />
-    <button onClick={handleRestart} style={{marginBottom: 16}} disabled>
-      서버 리스타트
-    </button>
-    {restartStatus && <div>{restartStatus}</div>}
+
       <table>
         <thead>
           <tr>
