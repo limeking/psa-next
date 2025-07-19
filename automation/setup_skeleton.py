@@ -16,19 +16,9 @@ FOLDERS = [
 
 FILES = {
     ".gitignore": """
-node_modules/
-build/
-dist/
-frontend/build/
-npm-debug.log
-yarn-debug.log
-yarn-error.log
-pnpm-lock.yaml
-frontend/.env
-.env
-.env.*
+# --- Python ---
 __pycache__/
-*.pyc
+*.py[cod]
 *.pyo
 *.pyd
 .mypy_cache/
@@ -37,7 +27,39 @@ __pycache__/
 venv/
 .eggs/
 *.egg-info/
+
+# --- Jupyter Notebook ---
 .ipynb_checkpoints/
+
+# --- Node/React ---
+node_modules/
+build/
+dist/
+frontend/build/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-lock.yaml
+
+# --- Env/Secrets ---
+.env
+.env.*
+frontend/.env
+*.pem
+*.key
+*.crt
+
+# --- Docker/DB/Redis ---
+docker-compose.override.yml
+*.pid
+*.sock
+db/data/
+redis/data/
+*.db
+*.sqlite3
+backup/
+
+# --- IDE/OS/Editor ---
 .DS_Store
 Thumbs.db
 .vscode/
@@ -45,13 +67,20 @@ Thumbs.db
 .history/
 .AppleDouble
 *.swp
-db/data/
-redis/data/
+
+# --- Coverage/Logs ---
 coverage.xml
-.coverage
+.coverage*
 *.log
-README.md
-*.md
+
+# --- Temp/Etc ---
+automation/tmp/
+automation/__pycache__/
+
+# === PSA-NEXT 실무 스켈레톤 전용 ===
+# 주의: 아래 항목들은 반드시 git에 포함시켜야 하니 .gitignore에서 제거하세요!
+# !README.md
+# !*.md
 """,
     ".dockerignore": """
 **/node_modules

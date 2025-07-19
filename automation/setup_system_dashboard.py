@@ -25,188 +25,14 @@ import os
 import json
 import subprocess
 import sys
+from datetime import datetime
 
 router = APIRouter(prefix="/sysadmin", tags=["System Admin"])
 
-@router.get("/status")
-def get_system_status():
+@router.get("/module-tree")
+def get_module_tree():
     """
-    운영: docker sdk, 개발: mock 데이터 (구조 동일, 동작 동일!)
-    """
-    is_prod = os.getenv("PSA_PRODUCTION") == "1"
-    if is_prod:
-        try:
-            import docker
-            client = docker.from_env()
-            containers = client.containers.list(all=True)
-            status_list = [
-                {
-                    "name": c.name,
-                    "status": c.status,
-                    "image": c.image.tags,
-                    "id": c.short_id
-                } for c in containers
-            ]
-            return {"containers": status_list, "env": "production"}
-        except Exception as e:
-            return {"error": str(e), "containers": [], "env": "production"}
-    else:
-        # 개발환경: mock 데이터 반환
-        return {
-            "containers": [
-                {"name": "backend", "status": "running", "image": "psa-backend:dev", "id": "123abc"},
-                {"name": "frontend", "status": "running", "image": "psa-frontend:dev", "id": "234bcd"},
-                {"name": "db", "status": "running", "image": "mysql:8", "id": "345cde"},
-                {"name": "nginx", "status": "running", "image": "nginx:latest", "id": "456def"},
-                {"name": "redis", "status": "exited", "image": "redis:7", "id": "567efg"}
-            ],
-            "env": "dev"
-        }
-
-@router.get("/modules")
-def get_modules_status():
-    """
-    PSA-NEXT 전체 모듈 현황 자동 조회
-    """
-    try:
-        current_dir = Path(__file__).resolve()
-        backend_dir = current_dir.parent.parent  # /app/backend/app/modules
-        frontend_dir = current_dir.parent.parent.parent.parent / "frontend/src/modules"
-        db_dir = current_dir.parent.parent.parent.parent / "db/modules"
-
-        def module_meta(mod_name):
-            meta_file = backend_dir / mod_name / 'module_info.json'
-            if meta_file.exists():
-                try:
-                    with open(meta_file, encoding='utf-8') as f:
-                        return json.load(f)
-                except Exception:
-                    return {}
-            return {}
-
-        backend_modules = set()
-        if backend_dir.exists():
-            backend_modules = {p.name for p in backend_dir.iterdir() if p.is_dir()}
-
-        frontend_modules = set()
-        if frontend_dir.exists():
-            frontend_modules = {p.name for p in frontend_dir.iterdir() if p.is_dir()}
-
-        db_modules = set()
-        if db_dir.exists():
-            db_modules = {p.stem for p in db_dir.glob("*.sql")}
-
-        all_modules = sorted(backend_modules | frontend_modules | db_modules)
-        results = []
-        for m in all_modules:
-            results.append({
-                "name": m,
-                "backend": m in backend_modules,
-                "frontend": m in frontend_modules,
-                "db": m in db_modules,
-                "enabled": module_meta(m).get("enabled", True),
-                "route": f"/{m}",
-                "meta": module_meta(m)
-            })
-        return results
-    except Exception as e:
-        return {"error": str(e)}
-
-@router.get("/events")
-def get_sysadmin_events():
-    """
-    최근 이벤트/에러 로그 반환 (운영: log 파일, 개발: mock data)
-    """
-    is_prod = os.getenv("PSA_PRODUCTION") == "1"
-    try:
-        if is_prod:
-            log_file = Path("/var/log/psa-next-events.log")
-            if log_file.exists():
-                lines = log_file.read_text(encoding='utf-8', errors='ignore').splitlines()[-20:]
-                return {"events": [ {"message": l} for l in lines ]}
-            else:
-                return {"events": [{"message": "(실운영 로그 파일이 없습니다)"}]}
-        else:
-            return {
-                "events": [
-                    {"message": "[INFO] 개발 환경 mock event #1"},
-                    {"message": "[WARN] 개발 mock 경고 예시"},
-                    {"message": "[ERROR] 임시 에러 로그: test failure"},
-                    {"message": "[INFO] PSA-NEXT 개발환경 이벤트 #2"}
-                ]
-            }
-    except Exception as e:
-        return {"error": str(e), "events": []}
-
-class ModuleName(BaseModel):
-    name: str
-
-@router.post("/create_module")
-def create_module(data: ModuleName):
-    """
-    add_module.py를 통해 모듈 자동 생성
-    """
-    try:
-        result = subprocess.run(
-            [sys.executable, "automation/add_module.py", data.name],
-            capture_output=True, text=True, cwd="/app"
-        )
-        run_generate_nginx()   # ⭐️ Nginx conf 자동 동기화
-        return {
-            "success": result.returncode == 0,
-            "stdout": result.stdout,
-            "stderr": result.stderr
-        }
-    except Exception as e:
-        return {"success": False, "error": str(e)}
-
-@router.post("/delete_module")
-def delete_module(data: ModuleName):
-    """
-    delete_module.py를 통해 모듈 자동 삭제
-    """
-    try:
-        result = subprocess.run(
-            [sys.executable, "automation/delete_module.py", data.name],
-            capture_output=True, text=True, cwd="/app"
-        )
-        run_generate_nginx()   # ⭐️ Nginx conf 자동 동기화
-        return {
-            "success": result.returncode == 0,
-            "stdout": result.stdout,
-            "stderr": result.stderr
-        }
-    except Exception as e:
-        return {"success": False, "error": str(e)}
-
-@router.post("/restart_backend")
-def restart_backend():
-    """
-    backend 컨테이너만 docker compose로 리스타트
-    """
-
-    import shutil
-
-    if not shutil.which("docker"):
-        return {"success": False, "error": "docker CLI가 서버 환경에 설치/등록되어 있지 않습니다."}  
-
-    try:
-        result = subprocess.run(
-            ["docker", "compose", "restart", "backend"],
-            capture_output=True, text=True, cwd="/app"
-        )
-        return {
-            "success": result.returncode == 0,
-            "stdout": result.stdout,
-            "stderr": result.stderr
-        }
-    except Exception as e:
-        return {"success": False, "error": str(e)}     
-
-@router.get("/tree")
-def get_modules_tree():
-    """
-    PSA-NEXT 전체 구조/모듈 트리형 JSON 반환 (백엔드/프론트/DB 구조 통합)
+    PSA-NEXT 전체 트리 구조 반환
     """
     try:
         current_dir = Path(__file__).resolve()
@@ -235,25 +61,195 @@ def get_modules_tree():
         tree = {
             "name": "PSA-NEXT",
             "children": [
-                {
-                    "name": "backend",
-                    "children": get_children(backend_dir)
-                },
-                {
-                    "name": "frontend",
-                    "children": get_children(frontend_dir)
-                },
-                {
-                    "name": "db",
-                    "children": get_children(db_dir)
-                }
+                {"name": "backend", "children": get_children(backend_dir)},
+                {"name": "frontend", "children": get_children(frontend_dir)},
+                {"name": "db", "children": get_children(db_dir)}
             ]
         }
         return tree
     except Exception as e:
-        return {"error": str(e)}   
+        return {"error": str(e)}
 
-''',
+@router.get("/status")
+def get_system_status():
+    """
+    전체 도커 컨테이너 & 모듈 상태 반환
+    """
+    is_prod = os.getenv("PSA_PRODUCTION") == "1"
+    containers = []
+    try:
+        if is_prod:
+            import docker
+            client = docker.from_env()
+            containers = [
+                {
+                    "name": c.name,
+                    "status": c.status,
+                    "image": c.image.tags,
+                    "id": c.short_id
+                } for c in client.containers.list(all=True)
+            ]
+        else:
+            containers = [
+                {"name": "backend", "status": "running", "image": "psa-backend:dev", "id": "123abc"},
+                {"name": "frontend", "status": "running", "image": "psa-frontend:dev", "id": "234bcd"},
+                {"name": "db", "status": "running", "image": "mysql:8", "id": "345cde"},
+                {"name": "nginx", "status": "running", "image": "nginx:latest", "id": "456def"},
+                {"name": "redis", "status": "exited", "image": "redis:7", "id": "567efg"}
+            ]
+    except Exception as e:
+        return {"error": str(e), "containers": []}
+
+    # (확장) 모듈 상태 예시 (여기선 mock, 실무에선 meta/헬스 연동)
+    modules_status = {
+        "admin": {"status": "OK", "version": "0.2.1", "last_sync": datetime.now().isoformat()},
+        "user": {"status": "OK", "version": "0.1.0", "last_sync": datetime.now().isoformat()},
+        "order": {"status": "FAIL", "version": "0.1.2", "last_sync": datetime.now().isoformat()},
+    }
+
+    return {"containers": containers, "modules": modules_status, "env": "production" if is_prod else "dev"}
+
+@router.get("/modules")
+def get_modules_status():
+    """
+    전체 모듈 현황(backend/frontend/db) 반환
+    """
+    try:
+        current_dir = Path(__file__).resolve()
+        backend_dir = current_dir.parent.parent
+        frontend_dir = current_dir.parent.parent.parent.parent / "frontend/src/modules"
+        db_dir = current_dir.parent.parent.parent.parent / "db/modules"
+
+        def module_meta(mod_name):
+            meta_file = backend_dir / mod_name / 'module_info.json'
+            if meta_file.exists():
+                try:
+                    with open(meta_file, encoding='utf-8') as f:
+                        return json.load(f)
+                except Exception:
+                    return {}
+            return {}
+
+        backend_modules = {p.name for p in backend_dir.iterdir() if p.is_dir()} if backend_dir.exists() else set()
+        frontend_modules = {p.name for p in frontend_dir.iterdir() if p.is_dir()} if frontend_dir.exists() else set()
+        db_modules = {p.stem for p in db_dir.glob("*.sql")} if db_dir.exists() else set()
+
+        all_modules = sorted(backend_modules | frontend_modules | db_modules)
+        results = []
+        for m in all_modules:
+            results.append({
+                "name": m,
+                "backend": m in backend_modules,
+                "frontend": m in frontend_modules,
+                "db": m in db_modules,
+                "enabled": module_meta(m).get("enabled", True),
+                "route": f"/{m}",
+                "meta": module_meta(m)
+            })
+        return results
+    except Exception as e:
+        return {"error": str(e)}
+
+@router.get("/events")
+def get_sysadmin_events():
+    """
+    최근 이벤트/에러 로그 반환
+    """
+    is_prod = os.getenv("PSA_PRODUCTION") == "1"
+    try:
+        if is_prod:
+            log_file = Path("/var/log/psa-next-events.log")
+            if log_file.exists():
+                lines = log_file.read_text(encoding='utf-8', errors='ignore').splitlines()[-20:]
+                return {"events": [ {"message": l} for l in lines ]}
+            else:
+                return {"events": [{"message": "(실운영 로그 파일이 없습니다)"}]}
+        else:
+            return {
+                "events": [
+                    {"message": "[INFO] 개발 환경 mock event #1"},
+                    {"message": "[WARN] 개발 mock 경고 예시"},
+                    {"message": "[ERROR] 임시 에러 로그: test failure"},
+                    {"message": "[INFO] PSA-NEXT 개발환경 이벤트 #2"}
+                ]
+            }
+    except Exception as e:
+        return {"error": str(e), "events": []}
+
+@router.get("/errors")
+def get_errors():
+    """
+    최근 에러/예외 로그만 반환 (이벤트에서 필터링)
+    """
+    # 개발환경 예시 (운영은 실 로그에서 에러라인만 추출)
+    try:
+        events = [
+            {"message": "[INFO] 개발 환경 mock event #1"},
+            {"message": "[WARN] 개발 mock 경고 예시"},
+            {"message": "[ERROR] 임시 에러 로그: test failure"},
+            {"message": "[INFO] PSA-NEXT 개발환경 이벤트 #2"}
+        ]
+        error_logs = [e for e in events if "ERROR" in e["message"]]
+        return {"errors": error_logs}
+    except Exception as e:
+        return {"error": str(e), "errors": []}
+
+@router.get("/health")
+def get_health():
+    """
+    전체 시스템 헬스 상태 (실제 ping/check 로직 연동 가능)
+    """
+    health = {
+        "backend": "OK",
+        "frontend": "OK",
+        "db": "OK",
+        "redis": "OK",
+        "nginx": "OK",
+    }
+    return {"health": health}
+
+class ModuleName(BaseModel):
+    name: str
+
+@router.post("/create_module")
+def create_module(data: ModuleName):
+    """
+    add_module.py를 통해 모듈 자동 생성
+    """
+    try:
+        result = subprocess.run(
+            [sys.executable, "automation/add_module.py", data.name],
+            capture_output=True, text=True, cwd="/app"
+        )
+        run_generate_nginx()   # Nginx conf 자동 동기화
+        return {
+            "success": result.returncode == 0,
+            "stdout": result.stdout,
+            "stderr": result.stderr
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+@router.post("/delete_module")
+def delete_module(data: ModuleName):
+    """
+    delete_module.py를 통해 모듈 자동 삭제
+    """
+    try:
+        result = subprocess.run(
+            [sys.executable, "automation/delete_module.py", data.name],
+            capture_output=True, text=True, cwd="/app"
+        )
+        run_generate_nginx()   # Nginx conf 자동 동기화
+        return {
+            "success": result.returncode == 0,
+            "stdout": result.stdout,
+            "stderr": result.stderr
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+''', 
+
 
     'schemas.py': '''from pydantic import BaseModel
 
@@ -271,9 +267,34 @@ class SystemStatus(BaseModel):
 }
 
 FRONTEND_FILES = {
-    'pages/SystemStatusPage.js': '''import React, { useEffect, useState } from 'react';
+    'pages/SystemStatusPage.js': '''import React, { useEffect, useState, useRef } from 'react';
 import { fetchSystemStatus, fetchModuleList, fetchEvents, createModule, deleteModule, restartBackend } from '../api/sysadmin';
 
+// 상태 뱃지 (컬러/강조)
+function StatusBadge({ status }) {
+  let color = "gray";
+  if (status === "OK" || status === "running") color = "#36ba46";
+  else if (status === "FAIL" || status === "exited") color = "#e94040";
+  else if (status === "starting") color = "#ffb100";
+  return (
+    <span style={{
+      display: "inline-block",
+      minWidth: 48,
+      padding: "2px 8px",
+      borderRadius: "8px",
+      background: color,
+      color: "#fff",
+      marginRight: 4,
+      fontWeight: "bold",
+      boxShadow: status === "FAIL" || status === "exited" ? "0 0 8px 2px #e9404066" : "none",
+      transition: "background 0.3s"
+    }}>
+      {status}
+    </span>
+  );
+}
+
+// 모듈 생성/삭제 컴포넌트
 function ModuleManager() {
   const [moduleName, setModuleName] = useState('');
   const [result, setResult] = useState(null);
@@ -311,10 +332,13 @@ function ModuleManager() {
   );
 }
 
+// 모듈 리스트 테이블 (상태 뱃지 적용)
 function ModuleList() {
   const [modules, setModules] = useState([]);
   useEffect(() => {
     fetchModuleList().then(setModules);
+    const timer = setInterval(() => fetchModuleList().then(setModules), 4000);
+    return () => clearInterval(timer);
   }, []);
   if (!modules.length) return <div>모듈 없음</div>;
   return (
@@ -335,9 +359,9 @@ function ModuleList() {
           {modules.map(m => (
             <tr key={m.name}>
               <td>{m.name}</td>
-              <td>{m.backend ? "O" : "-"}</td>
-              <td>{m.frontend ? "O" : "-"}</td>
-              <td>{m.db ? "O" : "-"}</td>
+              <td>{m.backend ? <StatusBadge status="OK" /> : "-"}</td>
+              <td>{m.frontend ? <StatusBadge status="OK" /> : "-"}</td>
+              <td>{m.db ? <StatusBadge status="OK" /> : "-"}</td>
               <td>{m.enabled ? "Y" : "N"}</td>
               <td>{m.route}</td>
             </tr>
@@ -348,18 +372,53 @@ function ModuleList() {
   );
 }
 
+// 에러/이벤트 로그 (강조/알림/자동 새로고침)
 function EventLog() {
   const [events, setEvents] = useState([]);
+  const [lastError, setLastError] = useState(null);
+  const mountedRef = useRef(false); // ⭐️ 추가
+
   useEffect(() => {
-    fetchEvents().then(res => setEvents(res.events || []));
-  }, []);
+    fetchEvents().then(res => {
+      setEvents(res.events || []);
+      const err = (res.events || []).find(e => (e.message || "").includes("ERROR"));
+      if (err && (!lastError || lastError !== err.message)) {
+        // ⭐️ 마운트 직후 첫 실행일 땐 alert 안 띄움
+        if (mountedRef.current) {
+          window.alert(`에러 발생: ${err.message}`);
+        }
+        setLastError(err.message);
+      }
+      mountedRef.current = true; // ⭐️ 첫 렌더 이후로 변경
+    });
+    const timer = setInterval(() => {
+      fetchEvents().then(res => {
+        setEvents(res.events || []);
+        const err = (res.events || []).find(e => (e.message || "").includes("ERROR"));
+        if (err && (!lastError || lastError !== err.message)) {
+          window.alert(`에러 발생: ${err.message}`);
+          setLastError(err.message);
+        }
+      });
+    }, 5000);
+    return () => clearInterval(timer);
+  }, [lastError]);
+
   if (!events.length) return <div>이벤트 없음</div>;
   return (
     <div>
       <h3>최근 이벤트/에러 로그</h3>
       <ul>
         {events.map((e, idx) => (
-          <li key={idx} style={{color: e.message.includes('ERROR') ? 'red' : e.message.includes('WARN') ? 'orange' : 'black'}}>
+          <li key={idx} style={{
+            color: e.message.includes('ERROR') ? '#e94040' :
+                   e.message.includes('WARN') ? '#ffb100' : 'black',
+            fontWeight: e.message.includes('ERROR') ? 'bold' : 'normal',
+            background: e.message.includes('ERROR') ? '#ffe0e0' : 'none',
+            borderRadius: "5px",
+            padding: "2px 6px",
+            marginBottom: "2px"
+          }}>
             {e.message}
           </li>
         ))}
@@ -368,16 +427,21 @@ function EventLog() {
   );
 }
 
+// 메인 시스템 상태 페이지 (실시간 새로고침)
 function SystemStatusPage() {
   const [status, setStatus] = useState({});
   const [loading, setLoading] = useState(true);
-  const [restartStatus, setRestartStatus] = useState(null)
+  const [restartStatus, setRestartStatus] = useState(null);
 
   useEffect(() => {
     fetchSystemStatus()
       .then((data) => setStatus(data))
       .catch((err) => setStatus({ error: err.message }))
       .finally(() => setLoading(false));
+    const timer = setInterval(() => {
+      fetchSystemStatus().then(setStatus);
+    }, 3000);
+    return () => clearInterval(timer);
   }, []);
 
   if (loading) return <div>로딩중...</div>;
@@ -393,9 +457,11 @@ function SystemStatusPage() {
   return (
     <div>
       <h2>시스템 상태 (환경: {status.env})</h2>
-      <ModuleManager />
-      <button onClick={handleRestart} style={{marginBottom: 16}}>서버 리스타트</button>
-      {restartStatus && <div>{restartStatus}</div>}
+    <ModuleManager />
+    <button onClick={handleRestart} style={{marginBottom: 16}} disabled>
+      서버 리스타트
+    </button>
+    {restartStatus && <div>{restartStatus}</div>}
       <table>
         <thead>
           <tr>
@@ -406,7 +472,7 @@ function SystemStatusPage() {
           {status.containers && status.containers.map((c, i) => (
             <tr key={c.name || i}>
               <td>{c.name}</td>
-              <td>{c.status}</td>
+              <td><StatusBadge status={c.status} /></td>
               <td>{c.image ? c.image : '-'}</td>
               <td>{c.id ? c.id : '-'}</td>
             </tr>
@@ -445,7 +511,7 @@ export default function ModuleTreePage() {
   const [tree, setTree] = useState(null);
 
   useEffect(() => {
-    fetch("/api/sysadmin/tree")
+    fetch("/api/sysadmin/module-tree")
       .then(res => res.json())
       .then(setTree);
   }, []);

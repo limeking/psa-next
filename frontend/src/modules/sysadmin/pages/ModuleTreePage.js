@@ -21,7 +21,7 @@ export default function ModuleTreePage() {
   const [tree, setTree] = useState(null);
 
   useEffect(() => {
-    fetch("/api/sysadmin/tree")
+    fetch("/api/sysadmin/module-tree")
       .then(res => res.json())
       .then(setTree);
   }, []);
