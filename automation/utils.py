@@ -280,5 +280,29 @@ def sort_appjs_routes():
     with open(appjs_path, 'w', encoding='utf-8') as f:
         f.writelines(cleaned)
 
+
+def rebuild_frontend_and_nginx():
+    """
+    운영환경에서 frontend를 빌드하고, nginx 컨테이너를 재시작한다.
+    PSA_PRODUCTION=1 환경변수가 설정되어 있으면만 실행(운영 자동화!)
+    """
+    import os
+    import subprocess
+    from pathlib import Path
+
+    PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
+    # 운영여부 감지
+    is_prod = os.getenv("PSA_PRODUCTION") == "1"
+    if is_prod:
+        print("[알림] PSA_PRODUCTION=1 운영환경에서는 아래 명령을 수동 실행하세요:")
+        print("  docker-compose -f docker-compose.prod.yml build frontend")
+        print("  docker-compose -f docker-compose.prod.yml up -d")
+        print("※ 컨테이너 내부에서는 docker 명령을 실행할 수 없습니다!")
+    else:
+        print("[개발] 프론트 빌드/재기동 생략(핫리로드이므로 자동반영)")
+
+
+
+
 def run_generate_nginx():
     subprocess.run(['python', 'automation/generate_nginx_conf.py'], cwd=BASE_DIR)

@@ -3,7 +3,7 @@ import sys
 import os
 import json
 import datetime
-from automation.utils import add_route_to_main, add_route_to_appjs, run_generate_nginx
+from automation.utils import add_route_to_main, add_route_to_appjs, run_generate_nginx, rebuild_frontend_and_nginx
 
 def main():
     if len(sys.argv) < 2:
@@ -70,6 +70,8 @@ export default function {module_cap}Page() {{
     add_route_to_appjs(module)
     # ⭐️ Nginx conf 자동 동기화!
     run_generate_nginx()
+    rebuild_frontend_and_nginx()
+
     print(f"[완료] {module} 모듈 생성 및 Nginx conf 동기화 완료!")
     print(f"[완료] {module_cap} 모듈 자동 생성 및 main.py, App.js 라우트 등록!")
 

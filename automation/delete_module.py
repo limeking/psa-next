@@ -2,7 +2,7 @@
 import sys
 import os
 import shutil
-from automation.utils import remove_route_from_main, remove_route_from_appjs, run_generate_nginx
+from automation.utils import remove_route_from_main, remove_route_from_appjs, run_generate_nginx, rebuild_frontend_and_nginx
 
 PROTECTED_MODULES = {"sysadmin"}
 
@@ -35,6 +35,7 @@ def main():
     remove_route_from_appjs(module)
     # ⭐️ Nginx conf 자동 동기화!
     run_generate_nginx()
+    rebuild_frontend_and_nginx()
     print(f"[완료] {module} 모듈 삭제 및 Nginx conf 동기화 완료!")
 
     print(f"[완료] {module} 모듈 삭제 및 main.py, App.js 라우트 삭제 완료!")
