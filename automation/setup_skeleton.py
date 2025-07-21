@@ -116,6 +116,7 @@ fastapi
 uvicorn[standard]
 pymysql
 bcrypt
+docker
 """,
     "backend/Dockerfile.dev": """
 FROM python:3.11-slim
@@ -128,7 +129,7 @@ CMD ["uvicorn", "backend.app.main:app", "--host", "0.0.0.0", "--reload"]
 FROM python:3.11-slim
 WORKDIR /app
 COPY . /app
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r backend/requirements.txt
 CMD ["uvicorn", "backend.app.main:app", "--host", "0.0.0.0"]
 """,
     "nginx/nginx.dev.conf": """
@@ -161,11 +162,8 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
     location / {
-        proxy_pass http://frontend:80;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        root /usr/share/nginx/html;
+        try_files $uri /index.html;
     }
 }
 """,
@@ -222,10 +220,11 @@ services:
 services:
   backend:
     build:
-      context: ./backend
-      dockerfile: Dockerfile.prod
+      context: .
+      dockerfile: backend/Dockerfile.prod
     environment:
       - PYTHONPATH=/app
+      - PSA_PRODUCTION=1 
     ports:
       - "8000:8000"
     depends_on:
@@ -256,6 +255,7 @@ services:
       dockerfile: Dockerfile
     volumes:
       - ./nginx/nginx.prod.conf:/etc/nginx/conf.d/default.conf
+      - /d/psa-next-build:/usr/share/nginx/html:ro  # 이 부분 추가!
     ports:
       - "80:80"
     depends_on:

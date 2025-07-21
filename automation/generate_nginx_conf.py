@@ -55,7 +55,6 @@ def generate_nginx_dev_conf(modules):
 
 def generate_nginx_prod_conf(modules):
     lines = ["server {", "    listen 80;"]
-    # (실무: prod에서도 location별 관리 필요하면 아래처럼 반복, 아니면 통합도 OK)
     for module in modules:
         lines.append(f"    location /api/{module['name']}/ {{")
         lines.append(f"        proxy_pass http://backend:8000/{module['name']}/;")
@@ -64,13 +63,14 @@ def generate_nginx_prod_conf(modules):
             lines.append(WEBSOCKET_HEADERS.rstrip())
         lines.append("    }")
     lines.append("    location / {")
-    lines.append("        proxy_pass http://frontend:80;")
-    lines.append(COMMON_PROXY_HEADERS.rstrip())
+    lines.append("        root /usr/share/nginx/html;")
+    lines.append("        try_files $uri /index.html;")
     lines.append("    }")
     lines.append("}")
     with open(NGINX_PROD_CONF, 'w', encoding='utf-8') as f:
         f.write('\n'.join(lines))
     print(f"✅ {NGINX_PROD_CONF} regenerated.")
+
 
 def main():
     modules = load_modules_meta()

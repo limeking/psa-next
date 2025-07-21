@@ -1,4 +1,5 @@
 # automation/setup_system_dashboard.py
+import subprocess
 import os
 import shutil
 import json
@@ -817,6 +818,30 @@ def write_module_info(module):
     with open(MODULE_INFO_PATH, 'w', encoding='utf-8') as f:
         json.dump(info, f, indent=2, ensure_ascii=False)
 
+
+def rebuild_and_restart_backend_container():
+    import subprocess
+    from pathlib import Path
+    PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
+    print("[자동 재빌드+재기동] backend 컨테이너 build & up 시도...")
+    result_build = subprocess.run(
+    ["docker", "compose", "-f", "docker-compose.prod.yml", "build", "backend"],
+    capture_output=True, text=True, encoding="utf-8", cwd=PROJECT_ROOT
+)
+    print("[build] stdout:", result_build.stdout)
+    print("[build] stderr:", result_build.stderr)
+    result_up = subprocess.run(
+        ["docker", "compose", "-f", "docker-compose.prod.yml", "up", "-d", "backend"],
+        capture_output=True, text=True, cwd=PROJECT_ROOT
+    )
+    print("[up] stdout:", result_up.stdout)
+    print("[up] stderr:", result_up.stderr)
+    if result_build.returncode == 0 and result_up.returncode == 0:
+        print("✅ backend 컨테이너가 완전히 재빌드+재기동되어 라우트가 100% 반영됨!")
+    else:
+        print("❌ backend 재빌드/재기동 실패! 위 로그 확인")
+
+
 def create_sysadmin_module():
     ensure_dir(BACKEND_SYSADMIN)
     for filename, content in BACKEND_FILES.items():
@@ -834,6 +859,7 @@ def create_sysadmin_module():
     add_route_to_appjs('sysadmin')   # React App.js에 라우트 자동 등록
     add_route_to_appjs('sysadmin/module-tree')  # 트리뷰 경로 자동등록
     run_generate_nginx()             # Nginx location 자동 동기화
+    # rebuild_and_restart_backend_container()
     print("✅ System dashboard module created & Nginx conf updated!")
 
 def delete_sysadmin_module():
@@ -846,6 +872,7 @@ def delete_sysadmin_module():
     remove_route_from_appjs('sysadmin')
     remove_route_from_appjs('sysadmin/module-tree')  # ⭐️ 이 한 줄 추가!
     run_generate_nginx()
+    # rebuild_and_restart_backend_container()
     print("🗑️ System dashboard module deleted & Nginx conf updated!")
 
 if __name__ == '__main__':
