@@ -38,11 +38,9 @@ async def websocket_endpoint(websocket: WebSocket):
     except WebSocketDisconnect:
         manager.disconnect(websocket)
 
+# PSA-NEXT 전체 모듈/디렉터리 트리 구조 반환
 @router.get("/module-tree")
 def get_module_tree():
-    """
-    PSA-NEXT 전체 트리 구조 반환
-    """
     try:
         current_dir = Path(__file__).resolve()
         backend_dir = current_dir.parent.parent
@@ -69,10 +67,11 @@ def get_module_tree():
 
         tree = {
             "name": "PSA-NEXT",
+            "type": "folder",
             "children": [
-                {"name": "backend", "children": get_children(backend_dir)},
-                {"name": "frontend", "children": get_children(frontend_dir)},
-                {"name": "db", "children": get_children(db_dir)}
+                {"name": "backend", "type": "folder", "children": get_children(backend_dir)},
+                {"name": "frontend", "type": "folder", "children": get_children(frontend_dir)},
+                {"name": "db", "type": "folder", "children": get_children(db_dir)}
             ]
         }
         return tree
@@ -118,11 +117,9 @@ def get_system_status():
 
     return {"containers": containers, "modules": modules_status, "env": "production" if is_prod else "dev"}
 
+# 전체 모듈 메타정보 반환 (상세 info용)
 @router.get("/modules")
 def get_modules_status():
-    """
-    전체 모듈 현황(backend/frontend/db) 반환
-    """
     try:
         current_dir = Path(__file__).resolve()
         backend_dir = current_dir.parent.parent
@@ -178,7 +175,7 @@ def get_sysadmin_events():
                 "events": [
                     {"message": "[INFO] 개발 환경 mock event #1"},
                     {"message": "[WARN] 개발 mock 경고 예시"},
-                    {"message": "[ERROR] 임시 에러 로그: test failure"},
+                    # {"message": "[ERROR] 임시 에러 로그: test failure"},
                     {"message": "[INFO] PSA-NEXT 개발환경 이벤트 #2"}
                 ]
             }

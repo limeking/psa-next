@@ -1,8 +1,28 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { fetchSystemStatus, fetchModuleList, fetchEvents, createModule, deleteModule } from '../api/sysadmin';
-import { useEventSocket } from '../hooks/useEventSocket'; // 이 줄 추가
 
-// 상태 뱃지 (컬러/강조)
+import React, { useEffect, useState, useRef } from 'react';
+import { fetchSystemStatus, fetchModuleList, fetchEvents, createModule, deleteModule } from '../api/sysadmin';
+import { useEventSocket } from '../hooks/useEventSocket';
+
+// 토스트 알림
+function Toast({ msg, type, onClose }) {
+  if (!msg) return null;
+  let bg = "#444";
+  if (type === "success") bg = "#36ba46";
+  if (type === "warn") bg = "#ffb100";
+  if (type === "error") bg = "#e94040";
+  return (
+    <div style={{
+      position: "fixed", top: 20, right: 20, zIndex: 1000,
+      background: bg, color: "#fff", padding: "12px 20px", borderRadius: 10,
+      fontWeight: "bold", boxShadow: "0 2px 12px #2224", minWidth: 200
+    }}>
+      {msg}
+      <button onClick={onClose} style={{ marginLeft: 12, color: "#fff", background: "none", border: "none", fontSize: 16, cursor: "pointer" }}>×</button>
+    </div>
+  );
+}
+
+// 상태 뱃지
 function StatusBadge({ status }) {
   let color = "gray";
   if (status === "OK" || status === "running") color = "#36ba46";
@@ -26,8 +46,8 @@ function StatusBadge({ status }) {
   );
 }
 
-// 모듈 생성/삭제 컴포넌트
-function ModuleManager() {
+// 모듈 생성/삭제
+function ModuleManager({ onToast }) {
   const [moduleName, setModuleName] = useState('');
   const [result, setResult] = useState(null);
 
@@ -35,12 +55,23 @@ function ModuleManager() {
     setResult(null);
     const res = await createModule(moduleName);
     setResult(res);
+    // 성공/실패 토스트 무조건 띄움
+    if (res && res.success) {
+      onToast(moduleName + " 모듈 생성 성공", "success");
+    } else {
+      onToast(moduleName + " 모듈 생성 실패: " + (res && (res.stderr || res.error || "에러")), "error");
+    }
   };
 
   const handleDelete = async () => {
     setResult(null);
     const res = await deleteModule(moduleName);
     setResult(res);
+    if (res && res.success) {
+      onToast(moduleName + " 모듈 삭제 성공", "success");
+    } else {
+      onToast(moduleName + " 모듈 삭제 실패: " + (res && (res.stderr || res.error || "에러")), "error");
+    }
   };
 
   return (
@@ -64,15 +95,9 @@ function ModuleManager() {
   );
 }
 
-// 모듈 리스트 테이블 (상태 뱃지 적용)
-function ModuleList() {
-  const [modules, setModules] = useState([]);
-  useEffect(() => {
-    fetchModuleList().then(setModules);
-    const timer = setInterval(() => fetchModuleList().then(setModules), 4000);
-    return () => clearInterval(timer);
-  }, []);
-  if (!modules.length) return <div>모듈 없음</div>;
+// 모듈 리스트(별도 polling 없이 props만)
+function ModuleList({ modules }) {
+  if (!modules || !modules.length) return <div>모듈 없음</div>;
   return (
     <div>
       <h3>모듈 현황</h3>
@@ -104,32 +129,24 @@ function ModuleList() {
   );
 }
 
-
-// ⭐️ WebSocket 실시간 이벤트/에러 로그
-function EventLog() {
-  const [events, setEvents] = useState([]);
-  const [lastError, setLastError] = useState(null);
-  const mountedRef = useRef(false);
-
-  // 최초 1회 기존 REST로 이벤트 가져오기 (fallback)
+// ⭐️ WebSocket 이벤트 + 최초 이벤트(fetchEvents)는 한 번만 호출!
+function EventLog({ onToast, events, setEvents }) {
+  // 최초 1회만 fetchEvents
   useEffect(() => {
     fetchEvents().then(res => {
       setEvents(res.events || []);
-      const err = (res.events || []).find(e => (e.message || "").includes("ERROR"));
-      if (err && (!lastError || lastError !== err.message)) {
-        if (mountedRef.current) window.alert(`에러 발생: ${err.message}`);
-        setLastError(err.message);
-      }
-      mountedRef.current = true;
     });
-  }, []);
+  }, [setEvents]);
 
-  // ⭐️ WebSocket으로 실시간 이벤트 받기
+  // WebSocket으로 실시간 이벤트 받기
   useEventSocket((msg) => {
-    setEvents(prev => [msg, ...prev].slice(0, 30)); // 최근 30개 유지
-    if ((msg.type === "error" || (msg.message || "").includes("ERROR")) && lastError !== msg.message) {
-      window.alert(`에러 발생: ${msg.message}`);
-      setLastError(msg.message);
+    setEvents(prev => [msg, ...prev].slice(0, 30));
+    if (msg.type === "error" || (msg.message || "").includes("ERROR")) {
+      onToast(msg.message, "error");
+    } else if (msg.type === "warn" || (msg.message || "").includes("WARN")) {
+      onToast(msg.message, "warn");
+    } else {
+      onToast(msg.message, "success");
     }
   });
 
@@ -143,7 +160,8 @@ function EventLog() {
             color: e.type === "error" || (e.message || "").includes('ERROR') ? '#e94040' :
                   (e.type === "warn" || (e.message || "").includes('WARN')) ? '#ffb100' : 'black',
             fontWeight: e.type === "error" ? 'bold' : 'normal',
-            background: e.type === "error" ? '#ffe0e0' : 'none',
+            background: e.type === "error" ? '#ffe0e0' :
+                       e.type === "warn" ? '#fff5d4' : 'none',
             borderRadius: "5px",
             padding: "2px 6px",
             marginBottom: "2px"
@@ -156,49 +174,52 @@ function EventLog() {
   );
 }
 
-
-// 메인 시스템 상태 페이지 (실시간 새로고침)
+// 메인 시스템 상태 페이지 (polling은 status/modules만)
 function SystemStatusPage() {
   const [status, setStatus] = useState({});
-  const [loading, setLoading] = useState(true);
+  const [modules, setModules] = useState([]);
   const [events, setEvents] = useState([]);
-  const [lastError, setLastError] = useState(null);
-  const mountedRef = useRef(false);
+  const [loading, setLoading] = useState(true);
+  const [toast, setToast] = useState({ msg: "", type: "" });
+  const lastToastRef = useRef({ msg: "", type: "", time: 0 });
+  const intervalRef = useRef(null);
 
   useEffect(() => {
-    fetchSystemStatus()
-      .then((data) => setStatus(data))
-      .catch((err) => setStatus({ error: err.message }))
-      .finally(() => setLoading(false));
-    const timer = setInterval(() => {
-      fetchSystemStatus().then(setStatus);
-    }, 3000);
-    fetchEvents().then(res => {
-      setEvents(res.events || []);
-      const err = (res.events || []).find(e => (e.message || "").includes("ERROR"));
-      if (err && (!lastError || lastError !== err.message)) {
-        if (mountedRef.current) window.alert(`에러 발생: ${err.message}`);
-        setLastError(err.message);
-      }
-      mountedRef.current = true;
-    });
-    return () => clearInterval(timer);
+    // polling은 status, modules만!
+    const fetchAll = async () => {
+      const [statusRes, modulesRes] = await Promise.all([
+        fetchSystemStatus(),
+        fetchModuleList()
+      ]);
+      setStatus(statusRes);
+      setModules(modulesRes);
+      setLoading(false);
+    };
+    fetchAll();
+    intervalRef.current = setInterval(fetchAll, process.env.NODE_ENV === 'production' ? 15000 : 5000);
+    return () => clearInterval(intervalRef.current);
   }, []);
 
-  // ⭐️ WebSocket 연결은 여기서 한 번만!
-  const handleEvent = useCallback((msg) => {
-    setEvents(prev => [msg, ...prev].slice(0, 30));
-    if ((msg.type === "error" || (msg.message || "").includes("ERROR")) && lastError !== msg.message) {
-      window.alert(`에러 발생: ${msg.message}`);
-      setLastError(msg.message);
+  const closeToast = () => setToast({ msg: "", type: "" });
+  const handleToast = (msg, type) => {
+    const now = Date.now();
+    if (
+      lastToastRef.current.msg === msg &&
+      lastToastRef.current.type === type &&
+      now - lastToastRef.current.time < 2000
+    ) {
+      return;
     }
-  }, [lastError]);
-  useEventSocket(handleEvent);
+    lastToastRef.current = { msg, type, time: now };
+    setToast({ msg, type });
+    setTimeout(closeToast, 3000);
+  };
 
   return (
     <div>
+      <Toast msg={toast.msg} type={toast.type} onClose={closeToast} />
       <h2>시스템 상태 (환경: {status.env})</h2>
-    <ModuleManager />
+      <ModuleManager onToast={handleToast} />  // ⭐️ 여기에 onToast 전달!
 
       <table>
         <thead>
@@ -217,8 +238,8 @@ function SystemStatusPage() {
           ))}
         </tbody>
       </table>
-      <ModuleList />
-      <EventLog />
+      <ModuleList modules={modules} />
+      <EventLog onToast={handleToast} events={events} setEvents={setEvents} />
     </div>
   );
 }
