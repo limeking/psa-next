@@ -11,7 +11,11 @@ FOLDERS = [
     "nginx",
     "db/modules",
     "db/data",
-    "redis/data"
+    "redis/data",
+    "logs/backend",    
+    "logs/nginx",      
+    "logs/mysql",
+    "backend/app/core"       
 ]
 
 FILES = {
@@ -102,10 +106,33 @@ README.md
 Dockerfile
 """,
     "README.md": "# PSA-NEXT 실무형 자동화 프로젝트 스켈레톤\n",
+    "backend/app/core/logging_config.py": '''
+import logging
+from logging.handlers import RotatingFileHandler
+import os
+
+LOG_DIR = os.environ.get("BACKEND_LOG_DIR", "/var/log/psa-next")
+LOG_FILE = os.path.join(LOG_DIR, "backend.log")
+
+def setup_logging():
+    os.makedirs(LOG_DIR, exist_ok=True)
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+    handler = RotatingFileHandler(LOG_FILE, maxBytes=10*1024*1024, backupCount=5)
+    formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    # stdout도 출력(운영환경 겸용)
+    logging.basicConfig(level=logging.INFO)
+''',
     "backend/app/main.py": '''
+from backend.app.core.logging_config import setup_logging
+setup_logging()
 from fastapi import FastAPI
 
+
 app = FastAPI()
+
 
 @app.get("/api/ping")
 def ping():
@@ -179,6 +206,7 @@ services:
       dockerfile: Dockerfile.dev
     volumes:
       - ./:/app
+      - ./logs/backend:/var/log/psa-next
     environment:
       - PYTHONPATH=/app
     ports:
@@ -195,6 +223,7 @@ services:
     volumes:
       - ./db/data:/var/lib/mysql
       - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./logs/mysql:/var/log/mysql
     ports:
       - "13306:3306"
 
@@ -211,6 +240,7 @@ services:
       dockerfile: Dockerfile
     volumes:
       - ./nginx/nginx.dev.conf:/etc/nginx/conf.d/default.conf
+      - ./logs/nginx:/var/log/nginx
     ports:
       - "80:80"
     depends_on:
